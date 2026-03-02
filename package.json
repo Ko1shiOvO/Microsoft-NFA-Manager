@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-minecraft-nfa-manager",
   "description": "Minecraft的NFA管理器",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "contributors": {
     "Ko1shiOvO": "https://github.com/Ko1shiOvO"
   },

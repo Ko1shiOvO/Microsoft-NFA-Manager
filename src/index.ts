@@ -131,7 +131,8 @@ export function apply(ctx: Context, config: Config) {
         '• nfa 获取一个NFA账号（领取后账号会被移除）',
         '',
         '管理员指令（需要权限 4）：',
-        '• nfa.add <account> <password> <mcName> [banStatus] [hypLevel] [capes]  (别名: addnfa, 添加NFA)',
+        '• nfa.add <格式化字符串> 或 nfa.add <account> <password> <mcName> [banStatus] [hypLevel] (别名: addnfa)',
+        '• nfa.batch <字符串1> <字符串2> ... (别名: batchnfa) — 批量添加NFA账号',
         '• nfa.remove <account> (别名: renfa) — 移除NFA',
         '• nfa.list (别名: nfalist) — 列出所有NFA账号',
         '• nfa.stats (别名: nfastats) — 查看统计',
@@ -220,6 +221,83 @@ export function apply(ctx: Context, config: Config) {
       })
 
       return ok(`已添加 NFA: ${account} (MC: ${mcName})`)
+    })
+
+  // 管理：批量添加 NFA
+  ctx.command('nfa.batch [input...]', { authority: 4 })
+    .alias('batchnfa')
+    .alias('批量添加NFA')
+    .action(async ({ session }, ...args: string[]) => {
+      if (!await isNfaAdmin(session)) return err('需要 NFA 管理员权限')
+      
+      if (!args || args.length === 0) return err('用法: batchnfa <格式化字符串1> <格式化字符串2> ... 或贴入多行文本')
+
+      const fullInput = args.join(' ')
+      // 尝试按换行符、分号、逗号分割
+      const lines = fullInput.split(/\n|;|，|、/).map(s => s.trim()).filter(Boolean)
+
+      if (lines.length === 0) return err('未检测到有效的输入行')
+
+      const results = {
+        success: 0,
+        failed: 0,
+        duplicated: 0,
+        errors: [] as string[]
+      }
+
+      for (const line of lines) {
+        try {
+          // 尝试解析该行
+          const parsed = parseNfaString(line)
+          if (!parsed || !parsed.account || !parsed.password || !parsed.mcName) {
+            results.failed++
+            results.errors.push(`❌ 解析失败: ${line.substring(0, 50)}...`)
+            continue
+          }
+
+          // 检查是否重复
+          const existing = await ctx.database.get('nfa_accounts', { account: parsed.account })
+          if (existing.length > 0) {
+            results.duplicated++
+            results.errors.push(`⚠️ 重复: ${parsed.account}`)
+            continue
+          }
+
+          // 插入数据库
+          await ctx.database.create('nfa_accounts', {
+            account: parsed.account,
+            password: parsed.password,
+            mcName: parsed.mcName,
+            banStatus: parsed.banStatus as 'unban' | 'ban',
+            hypLevel: parsed.hypLevel || 0,
+            capes: '无',
+            status: 'available',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          })
+          results.success++
+        } catch (e) {
+          results.failed++
+          results.errors.push(`❌ 错误: ${(e as any).message || '未知错误'}`)
+        }
+      }
+
+      const summary = [
+        '✅ 批量添加完成',
+        `成功: ${results.success}`,
+        `失败: ${results.failed}`,
+        `重复: ${results.duplicated}`,
+      ]
+
+      if (results.errors.length > 0 && results.errors.length <= 10) {
+        summary.push('', '详情：')
+        summary.push(...results.errors)
+      } else if (results.errors.length > 10) {
+        summary.push('', `详情: 前 10 条错误`)
+        summary.push(...results.errors.slice(0, 10))
+      }
+
+      return summary.join('\n')
     })
 
   // 管理：移除 NFA（归入 nfa.remove）
